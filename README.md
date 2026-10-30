@@ -29,7 +29,7 @@ opts = {
 	cmd = "mdrev",          -- binary to call
 	lsp = true,             -- false to configure the language server yourself
 	keys = {                -- set to false to use :MdrevComment / :MdrevThreads only
-		comment = "mc",     -- on a visual selection
+		comment = "mc",     -- a visual selection, or the line under the cursor
 		threads = "mt",     -- on the line the cursor is on
 	},
 }
@@ -42,15 +42,14 @@ opts = {
   fragment is kept and marked `[anchor lost]`.
 - **`mc` on a selection** — a compose float; `:w` files the comment
   (`:q` discards). A multi-line selection anchors to the whole fragment.
+- **`mc` with no selection** — comments the line under the cursor; mdrev
+  anchors on the line's first words.
 - **`mt` near a comment** — a thread float: the paragraph the comment is
   about with the anchored fragment marked, the discussion, `r` reply,
   `x` resolve, `j`/`k` other threads, `q` close.
 - **Everything stays in sync** — actions go through the mdrev CLI against
   the sidecar; the language server picks changes up within a second, and
   lock contention with it is retried once.
-
-Comments anchor against the file on disk, so a modified buffer is asked to
-save before a comment is filed.
 
 ## Verify the install
 

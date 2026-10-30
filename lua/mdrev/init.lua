@@ -39,6 +39,9 @@ function M.setup(opts)
 					require("mdrev.comment").comment(args.buf,
 						math.min(a, b) - 1, math.max(a, b) - 1)
 				end, { buffer = args.buf, desc = "mdrev: comment the selection" })
+				vim.keymap.set("n", keys.comment, function()
+					require("mdrev.comment").line(args.buf, vim.fn.line(".") - 1)
+				end, { buffer = args.buf, desc = "mdrev: comment the line" })
 			end
 			if keys.threads then
 				vim.keymap.set("n", keys.threads, function()

@@ -71,6 +71,19 @@ end)
 	wait_for("float closed", function() return not vim.api.nvim_win_is_valid(threads._state.win) end)
 end
 
+-- 5. `mc` with no selection comments the line under the cursor: mdrev
+-- quotes the line's first words itself.
+vim.api.nvim_win_set_cursor(0, { 6, 0 })
+vim.api.nvim_feedkeys("mc", "mx", false)
+wait_for("line compose opens", function()
+	return vim.bo[vim.api.nvim_get_current_buf()].buftype == "acwrite"
+end)
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { "smoke: line comment" })
+vim.cmd("w")
+wait_for("line comment filed", function() return #sync_list() == 1 end)
+check("line comment anchors on the line's words",
+	sync_list()[1].selected_text == "Beta paragraph after a blank.")
+
 -- 5. the language server config is loadable from the runtimepath
 local cfg = vim.lsp.config["mdrev"]
 check("lsp config on runtimepath", cfg ~= nil and cfg.filetypes ~= nil)
