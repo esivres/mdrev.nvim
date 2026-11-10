@@ -26,6 +26,7 @@ function M.setup(opts)
 	end
 
 	local keys = opts.keys or { comment = "mc", threads = "mt" }
+	require("mdrev.threads").toggle_key = keys.threads
 	local group = vim.api.nvim_create_augroup("mdrev", { clear = true })
 	vim.api.nvim_create_autocmd("FileType", {
 		group = group,

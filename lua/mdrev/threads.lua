@@ -8,6 +8,9 @@ local cli = require("mdrev.cli")
 local compose = require("mdrev.compose")
 
 local M = {}
+-- The user's threads key, set by setup: the panel maps it too, so the
+-- documented mt toggle works with the panel focused.
+M.toggle_key = nil
 local ns = vim.api.nvim_create_namespace("mdrev-threads")
 local state = { threads = {}, idx = 1, win = -1, buf = -1, doc = "", docwin = -1 }
 
@@ -113,6 +116,7 @@ local function after_action()
 			vim.notify("mdrev: review clean")
 		else
 			render()
+			follow() -- the selection may have moved to another thread
 		end
 	end)
 end
@@ -161,17 +165,32 @@ function M.open(buf)
 		return
 	end
 	state.doc = vim.api.nvim_buf_get_name(buf or 0)
-	-- The document's window, not the current one: mt may fire while a
-	-- compose float is still closing and the current window is that float.
-	state.docwin = vim.fn.bufwinid(buf or 0)
-	if state.docwin == -1 then
-		state.docwin = vim.api.nvim_get_current_win()
+	-- The window mt was pressed in, when it shows the document: with the
+	-- buffer in several splits the panel belongs beside the invoking one.
+	-- Otherwise the document's first window; a compose float may still be
+	-- the current window while it closes.
+	local cur = vim.api.nvim_get_current_win()
+	if vim.fn.winbufnr(cur) == buf then
+		state.docwin = cur
+	else
+		state.docwin = vim.fn.bufwinid(buf or 0)
+		if state.docwin == -1 then
+			state.docwin = cur
+		end
 	end
 	local row = vim.fn.line(".", state.docwin)
 	refresh(function(n)
 		if n == 0 then
 			vim.notify("mdrev: review clean")
 			return
+		end
+		-- The document window may be gone by the time the listing returns;
+		-- without a live one there is nothing to split or follow.
+		if not vim.api.nvim_win_is_valid(state.docwin) then
+			state.docwin = vim.fn.bufwinid(buf or 0)
+			if state.docwin == -1 then
+				return
+			end
 		end
 		local nearest, best = 1, math.huge
 		for i, t in ipairs(state.threads) do
@@ -189,6 +208,9 @@ function M.open(buf)
 		vim.wo[state.win].wrap = false
 		vim.keymap.set("n", "q", close, { buffer = state.buf, silent = true })
 		vim.keymap.set("n", "<Esc>", close, { buffer = state.buf, silent = true })
+		if M.toggle_key then
+			vim.keymap.set("n", M.toggle_key, close, { buffer = state.buf, silent = true })
+		end
 		vim.api.nvim_create_autocmd("WinClosed", {
 			pattern = tostring(state.win),
 			once = true,
