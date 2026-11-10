@@ -46,7 +46,7 @@ function M.setup(opts)
 			if keys.threads then
 				vim.keymap.set("n", keys.threads, function()
 					require("mdrev.threads").open(args.buf)
-				end, { buffer = args.buf, desc = "mdrev: threads near the cursor" })
+				end, { buffer = args.buf, desc = "mdrev: toggle the threads panel" })
 			end
 		end,
 	})

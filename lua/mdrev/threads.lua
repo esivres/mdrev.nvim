@@ -1,34 +1,55 @@
--- The thread float: the paragraph a comment is about, the comment with its
--- replies, and one-key actions. Display only — all state lives in the
--- sidecar, reached through the CLI, so the language server, the terminal UI
--- and this float never disagree for long.
+-- The threads panel: a right-hand split with every open thread — quote,
+-- discussion, replies — instead of a float. j/k walk the threads and move
+-- the document cursor to the anchor, so the context is the document itself.
+-- Display only — all state lives in the sidecar, reached through the CLI,
+-- so the language server, the terminal UI and this panel never disagree
+-- for long.
 local cli = require("mdrev.cli")
 local compose = require("mdrev.compose")
 
 local M = {}
 local ns = vim.api.nvim_create_namespace("mdrev-threads")
-local state = { threads = {}, idx = 1, win = -1, buf = -1, doc = "" }
+local state = { threads = {}, idx = 1, win = -1, buf = -1, doc = "", docwin = -1 }
 
--- The paragraph around a line, blank-line bounded, as the terminal UI shows it.
-local function paragraph(buf, line)
-	local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-	line = math.max(1, math.min(line, #lines))
-	local top, bot = line, line
-	while top > 1 and lines[top - 1] ~= "" do
-		top = top - 1
-	end
-	while bot < #lines and lines[bot + 1] ~= "" do
-		bot = bot + 1
-	end
-	return vim.list_slice(lines, top, bot), top
+-- The first document line of the anchored fragment; the panel jumps there.
+local function anchor_line(t)
+	return t.line or 1
 end
 
--- First and last document line of the anchored fragment: a multi-line quote
--- must read as one marked fragment, not as a marked line plus loose text.
-local function fragment_span(t)
-	local n = #vim.split(t.selected_text or "", "\n", { plain = true })
-	local first = t.line or 1
-	return first, first + math.max(n - 1, 0)
+local function close()
+	if vim.api.nvim_win_is_valid(state.win) then
+		vim.api.nvim_win_close(state.win, false)
+	end
+end
+
+-- Each thread becomes a block; the selected one is highlighted whole.
+local function blocks()
+	local out, span = {}, {}
+	for i, t in ipairs(state.threads) do
+		local first = #out + 1
+		local kind = (t.type and t.type ~= "") and t.type or "comment"
+		local head = ("%d · line %d · %s · %s"):format(i, t.line or 1, kind, t.author or "?")
+		if t.orphaned then
+			head = "[anchor lost] " .. head
+		end
+		table.insert(out, head)
+		local function push(prefix, s)
+			for _, l in ipairs(vim.split(s or "", "\n", { plain = true })) do
+				table.insert(out, prefix .. l)
+			end
+		end
+		push("  › ", t.selected_text)
+		push("  ", t.text)
+		for _, r in ipairs(t.replies or {}) do
+			push("      " .. (r.author or "?") .. ": ", r.text)
+		end
+		if t.x_suggested_text and t.x_suggested_text ~= "" then
+			push("      suggestion: ", t.x_suggested_text)
+		end
+		span[i] = { first, #out }
+		table.insert(out, "")
+	end
+	return out, span
 end
 
 local function render()
@@ -36,59 +57,30 @@ local function render()
 	if not t or not vim.api.nvim_win_is_valid(state.win) then
 		return
 	end
-	local docbuf = vim.fn.bufnr(state.doc)
-	if docbuf <= 0 then
-		return
-	end
-
-	local first, last = fragment_span(t)
-	local para, top = paragraph(docbuf, first)
-	local content = {}
-	for i, l in ipairs(para) do
-		local docline = top + i - 1
-		table.insert(content, (docline >= first and docline <= last) and ("> " .. l) or ("  " .. l))
-	end
-
-	table.insert(content, "")
-	local function push(prefix, s)
-		for _, l in ipairs(vim.split(s or "", "\n", { plain = true })) do
-			table.insert(content, prefix .. l)
-		end
-	end
-	local kind = (t.type and t.type ~= "") and (" · " .. t.type) or ""
-	local head = t.author .. kind .. ": "
-	if t.orphaned then
-		head = "[anchor lost] " .. head
-	end
-	push(head, t.text)
-	for _, r in ipairs(t.replies or {}) do
-		push("    " .. (r.author or "?") .. ": ", r.text)
-	end
-	if t.x_suggested_text and t.x_suggested_text ~= "" then
-		push("    suggestion: ", t.x_suggested_text)
-	end
-	table.insert(content, "")
-	table.insert(content, ("%d/%d  [r] reply  [x] resolve  [j]/[k] thread  [q] close")
+	local content, span = blocks()
+	table.insert(content, ("%d/%d  [j]/[k] thread  [r] reply  [x] resolve  [q] close")
 		:format(state.idx, #state.threads))
 
 	local buf, win = state.buf, state.win
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, content)
-	vim.api.nvim_win_set_config(win, { height = math.min(#content, vim.o.lines - 4) })
-
-	-- Highlight the fragment inside the paragraph, line by line.
 	vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-	local frag = vim.split(t.selected_text or "", "\n", { plain = true })
-	for i, l in ipairs(content) do
-		local docline = top + i - 1
-		if docline >= first and docline <= last and l:sub(1, 1) == ">" then
-			local seg = frag[docline - first + 1] or ""
-			local s = seg ~= "" and l:find(seg, 3, true)
-			if s then
-				vim.highlight.range(buf, ns, "Search", { i - 1, s - 1 }, { i - 1, s - 1 + #seg })
-			end
-		end
+	local sel = span[state.idx]
+	if sel then
+		vim.api.nvim_buf_set_extmark(buf, ns, sel[1] - 1, 0, {
+			end_line = sel[2],
+			line_hl_group = "Visual",
+		})
+		vim.api.nvim_win_set_cursor(win, { sel[1], 0 })
 	end
-	vim.api.nvim_win_set_cursor(win, { 1, 0 })
+end
+
+-- Selection moves the document cursor with it: the panel entry and the
+-- paragraph it talks about stay in view together.
+local function follow()
+	local t = state.threads[state.idx]
+	if t and vim.api.nvim_win_is_valid(state.docwin) then
+		vim.api.nvim_win_set_cursor(state.docwin, { anchor_line(t), 0 })
+	end
 end
 
 local function cycle(d)
@@ -97,6 +89,7 @@ local function cycle(d)
 	end
 	state.idx = ((state.idx - 1 + d + #state.threads) % #state.threads) + 1
 	render()
+	follow()
 end
 
 local function refresh(cb)
@@ -105,15 +98,21 @@ local function refresh(cb)
 			vim.notify("mdrev: " .. err, vim.log.levels.ERROR)
 			return
 		end
-		for _, t in ipairs(threads) do
-			t._doc = state.doc
-		end
 		state.threads = threads
 		if state.idx > #threads then
 			state.idx = math.max(1, #threads)
 		end
-		if cb then
-			cb(#threads)
+		cb(#threads)
+	end)
+end
+
+local function after_action()
+	refresh(function(n)
+		if n == 0 then
+			close()
+			vim.notify("mdrev: review clean")
+		else
+			render()
 		end
 	end)
 end
@@ -123,7 +122,7 @@ local function reply()
 	if not t then
 		return
 	end
-	local file = t._doc
+	local file = state.doc
 	compose.open({ title = "reply to " .. t.id:sub(1, 8), on_save = function(_, text, done)
 		cli.run({ cli.bin(), "reply", "--file", file, "--id", t.id, "--text", text },
 			function(ok, _, err)
@@ -133,7 +132,7 @@ local function reply()
 					return
 				end
 				done()
-				refresh(function() render() end)
+				after_action()
 			end)
 	end })
 end
@@ -143,34 +142,32 @@ local function resolve()
 	if not t then
 		return
 	end
-	cli.run({ cli.bin(), "resolve", "--file", t._doc, "--id", t.id }, function(ok, _, err)
+	cli.run({ cli.bin(), "resolve", "--file", state.doc, "--id", t.id }, function(ok, _, err)
 		if not ok then
 			vim.notify("mdrev: " .. err, vim.log.levels.ERROR)
 			return
 		end
-		refresh(function(n)
-			if n == 0 then
-				if vim.api.nvim_win_is_valid(state.win) then
-					vim.api.nvim_win_close(state.win, false)
-				end
-				vim.notify("mdrev: review clean")
-			else
-				render()
-			end
-		end)
+		after_action()
 	end)
 end
 
--- The float with the thread nearest the cursor row. Takes the document
--- buffer explicitly: the current buffer may be a compose float.
+-- The panel with every thread of the document, `mt` toggles it. Takes the
+-- document buffer explicitly: the current buffer may be a compose float.
 function M.open(buf)
-	-- A second open (the command is repeatable) must replace the previous
-	-- float, or its window stays with dead mappings forever.
+	-- A second open closes the panel; a stale window from a closed document
+	-- must not keep dead mappings alive either.
 	if vim.api.nvim_win_is_valid(state.win) then
-		vim.api.nvim_win_close(state.win, false)
+		close()
+		return
 	end
 	state.doc = vim.api.nvim_buf_get_name(buf or 0)
-	local row = vim.fn.line(".")
+	-- The document's window, not the current one: mt may fire while a
+	-- compose float is still closing and the current window is that float.
+	state.docwin = vim.fn.bufwinid(buf or 0)
+	if state.docwin == -1 then
+		state.docwin = vim.api.nvim_get_current_win()
+	end
+	local row = vim.fn.line(".", state.docwin)
 	refresh(function(n)
 		if n == 0 then
 			vim.notify("mdrev: review clean")
@@ -187,24 +184,11 @@ function M.open(buf)
 
 		state.buf = vim.api.nvim_create_buf(false, true)
 		vim.bo[state.buf].buftype = "nofile"
-		state.win = vim.api.nvim_open_win(state.buf, true, {
-			relative = "editor",
-			anchor = "NE",
-			col = vim.o.columns - 2,
-			row = 1,
-		width = math.min(76, vim.o.columns - 4),
-		height = 5,
-		-- A title shows only with a border.
-		border = "rounded",
-		title = { { " mdrev threads ", "Title" } },
-		title_pos = "center",
-		style = "minimal",
-	})
-		vim.keymap.set("n", "q", function()
-			if vim.api.nvim_win_is_valid(state.win) then
-				vim.api.nvim_win_close(state.win, false)
-			end
-		end, { buffer = state.buf, silent = true })
+		state.win = vim.api.nvim_open_win(state.buf, true, { split = "right", win = state.docwin })
+		vim.api.nvim_win_set_width(state.win, 46)
+		vim.wo[state.win].wrap = false
+		vim.keymap.set("n", "q", close, { buffer = state.buf, silent = true })
+		vim.keymap.set("n", "<Esc>", close, { buffer = state.buf, silent = true })
 		vim.api.nvim_create_autocmd("WinClosed", {
 			pattern = tostring(state.win),
 			once = true,
@@ -220,6 +204,7 @@ function M.open(buf)
 		vim.keymap.set("n", "r", reply, { buffer = state.buf })
 		vim.keymap.set("n", "x", resolve, { buffer = state.buf })
 		render()
+		follow()
 	end)
 end
 

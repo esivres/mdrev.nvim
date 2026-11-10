@@ -26,7 +26,7 @@ local function wait_for(name, fn)
 	return ok
 end
 
-local function float_lines()
+local function panel_lines()
 	return vim.api.nvim_buf_get_lines(threads._state.buf, 0, -1, false)
 end
 
@@ -47,33 +47,39 @@ vim.api.nvim_buf_set_lines(0, 0, -1, false, { "smoke: both lines are one comment
 vim.cmd("w")
 wait_for("comment filed", function() return #sync_list() == 1 end)
 
--- 2. thread float: the fragment is marked on BOTH lines, highlighted too
+-- 2. threads panel: a real split (not a float), quote and discussion of
+-- every thread in it, selection highlighted, document cursor following.
 threads.open(docbuf)
-wait_for("float opens", function() return vim.api.nvim_win_is_valid(threads._state.win) end)
+wait_for("panel opens", function() return vim.api.nvim_win_is_valid(threads._state.win) end)
 if vim.api.nvim_win_is_valid(threads._state.win) then
-	local lines = float_lines()
-	local marked = vim.tbl_filter(function(l) return l:sub(1, 2) == "> " end, lines)
-	check("fragment marked on both lines", #marked == 2,
-		("%d marked: %s"):format(#marked, table.concat(marked, " | ")))
+	check("panel is a split, not a float",
+		vim.api.nvim_win_get_config(threads._state.win).relative == "")
+	check("panel shows the quoted fragment",
+		#vim.tbl_filter(function(l) return l:find("› Alpha paragraph", 1, true) end,
+			panel_lines()) == 1)
 	local marks = vim.api.nvim_buf_get_extmarks(threads._state.buf,
 		vim.api.nvim_create_namespace("mdrev-threads"), 0, -1, {})
-	check("fragment highlighted on both lines", #marks >= 2, ("%d extmarks"):format(#marks))
+	check("selection highlighted", #marks == 1, ("%d extmarks"):format(#marks))
+	check("document cursor follows the anchor",
+		vim.fn.line(".", threads._state.docwin) == sync_list()[1].line,
+		("curline=%s want=%s"):format(vim.fn.line(".", threads._state.docwin),
+			tostring(sync_list()[1] and sync_list()[1].line)))
 
-	-- 3. reply through the float's compose
+	-- 3. reply through the panel's compose
 	threads._reply()
 	vim.api.nvim_buf_set_lines(0, 0, -1, false, { "smoke: replied" })
 	vim.cmd("w")
 	wait_for("reply lands", function() return #(sync_list()[1].replies or {}) == 1 end)
-wait_for("reply shown in float", function()
-	return #vim.tbl_filter(function(l)
-		return l:find("smoke: replied", 1, true)
-	end, float_lines()) == 1
-end)
+	wait_for("reply shown in panel", function()
+		return #vim.tbl_filter(function(l)
+			return l:find("smoke: replied", 1, true)
+		end, panel_lines()) == 1
+	end)
 
-	-- 4. resolve: float closes, review clean
+	-- 4. resolve: panel closes, review clean
 	threads._resolve()
 	wait_for("review clean", function() return #sync_list() == 0 end)
-	wait_for("float closed", function() return not vim.api.nvim_win_is_valid(threads._state.win) end)
+	wait_for("panel closed", function() return not vim.api.nvim_win_is_valid(threads._state.win) end)
 end
 
 -- 5. `mc` with no selection comments the line under the cursor, through
