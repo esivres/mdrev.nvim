@@ -38,6 +38,11 @@ vim.api.nvim_feedkeys("Vjmc", "mx", false)
 wait_for("compose opens", function()
 	return vim.bo[vim.api.nvim_get_current_buf()].buftype == "acwrite"
 end)
+local compose_state = require("mdrev.compose")._state
+local function sel_line()
+	return vim.api.nvim_buf_get_lines(compose_state.sel_buf, 0, -1, false)[1] or ""
+end
+check("selector shows the default type", sel_line():find("%[ comment %]", 1, false) ~= nil, sel_line())
 vim.api.nvim_buf_set_lines(0, 0, -1, false, { "smoke: both lines are one comment" })
 vim.cmd("w")
 wait_for("comment filed", function() return #sync_list() == 1 end)
@@ -71,16 +76,22 @@ end)
 	wait_for("float closed", function() return not vim.api.nvim_win_is_valid(threads._state.win) end)
 end
 
--- 5. `mc` with no selection comments the line under the cursor: mdrev
--- quotes the line's first words itself.
+-- 5. `mc` with no selection comments the line under the cursor, through
+-- the new keys: Tab picks the type, C-s files the comment.
 vim.api.nvim_win_set_cursor(0, { 6, 0 })
 vim.api.nvim_feedkeys("mc", "mx", false)
 wait_for("line compose opens", function()
 	return vim.bo[vim.api.nvim_get_current_buf()].buftype == "acwrite"
 end)
 vim.api.nvim_buf_set_lines(0, 0, -1, false, { "smoke: line comment" })
-vim.cmd("w")
+vim.api.nvim_feedkeys("\t", "mx", false)
+wait_for("Tab cycles the type", function()
+	return sel_line():find("%[ issue %]", 1, false) ~= nil
+end)
+vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-s>", true, false, true), "mx", false)
 wait_for("line comment filed", function() return #sync_list() == 1 end)
+check("comment carries the picked type", sync_list()[1].type == "issue",
+	vim.inspect(sync_list()[1].type))
 check("line comment anchors on the line's words",
 	sync_list()[1].selected_text == "Beta paragraph after a blank.")
 

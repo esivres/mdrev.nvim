@@ -124,7 +124,7 @@ local function reply()
 		return
 	end
 	local file = t._doc
-	compose.open("reply to " .. t.id:sub(1, 8), function(text, done)
+	compose.open({ title = "reply to " .. t.id:sub(1, 8), on_save = function(_, text, done)
 		cli.run({ cli.bin(), "reply", "--file", file, "--id", t.id, "--text", text },
 			function(ok, _, err)
 				if not ok then
@@ -135,7 +135,7 @@ local function reply()
 				done()
 				refresh(function() render() end)
 			end)
-	end)
+	end })
 end
 
 local function resolve()

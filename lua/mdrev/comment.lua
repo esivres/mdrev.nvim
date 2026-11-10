@@ -23,21 +23,32 @@ local function file_of(buf)
 	return file
 end
 
+-- The selector's entries, in the Go TUI's order and wording; "" is the
+-- type-less comment and the default.
+local TYPES = { "", "issue", "question", "suggestion" }
+
 local function compose_comment(title, file, anchor, row)
-	compose.open(title, function(text, done)
-		local args = { cli.bin(), "comment", "--file", file }
-		vim.list_extend(args, anchor)
-		vim.list_extend(args, { "--line", tostring(row + 1), "--text", text })
-		cli.run(args, function(ok, _, err)
-			if not ok then
-				vim.notify("mdrev: " .. err, vim.log.levels.ERROR)
-				done(true) -- keep the float armed for a retry
-				return
+	compose.open({
+		title = title,
+		types = TYPES,
+		on_save = function(type, text, done)
+			local args = { cli.bin(), "comment", "--file", file }
+			vim.list_extend(args, anchor)
+			if type and type ~= "" then
+				vim.list_extend(args, { "--type", type })
 			end
-			vim.notify("mdrev: comment filed")
-			done()
-		end)
-	end)
+			vim.list_extend(args, { "--line", tostring(row + 1), "--text", text })
+			cli.run(args, function(ok, _, err)
+				if not ok then
+					vim.notify("mdrev: " .. err, vim.log.levels.ERROR)
+					done(true) -- keep the float armed for a retry
+					return
+				end
+				vim.notify("mdrev: comment filed")
+				done()
+			end)
+		end,
+	})
 end
 
 -- On a selection: the quote is the selected lines.
