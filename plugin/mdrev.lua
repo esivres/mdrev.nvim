@@ -10,3 +10,7 @@ end, { range = true, desc = "mdrev: comment the selected lines" })
 vim.api.nvim_create_user_command("MdrevThreads", function()
 	require("mdrev.threads").open()
 end, { desc = "mdrev: thread nearest the cursor" })
+
+vim.api.nvim_create_user_command("MdrevPreview", function()
+	require("mdrev.preview").open(0)
+end, { desc = "mdrev: browser preview of the current file" })
