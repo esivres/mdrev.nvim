@@ -1,44 +1,54 @@
--- Browser preview: `mdrev preview` serves the file from disk and lives as
--- long as this Neovim does. Attached vim.system children are promised that
--- death, but only an explicit VimLeavePre kill makes it certain on every
--- exit path, so both are used.
+-- Browser preview: `mdrev preview` serves the file from disk; one process
+-- per file, as many files as the reviewer opens. Lives as long as this
+-- Neovim does. Attached vim.system children are promised that death, but
+-- only an explicit kill makes it certain on every exit path (LazyVim can
+-- cut the VimLeavePre chain short), so both events carry it.
 local cli = require("mdrev.cli")
 
-local M = { proc = nil }
+local M = { procs = {} }
 
 local function leave_kill()
-	if M.proc then
-		M.proc:kill()
-		M.proc = nil
+	for file, entry in pairs(M.procs) do
+		pcall(function()
+			entry.proc:kill()
+		end)
+		M.procs[file] = nil
 	end
 end
 
-function M.open(buf)
+local function guard(buf)
 	local file = vim.api.nvim_buf_get_name(buf)
 	if file == "" then
 		vim.notify("mdrev: the buffer has no file", vim.log.levels.WARN)
-		return
+		return nil
 	end
 	-- The server reads the document from disk: a dirty buffer would preview
 	-- stale text and anchor new comments against it.
 	if vim.bo[buf].modified then
 		vim.notify("mdrev: save the buffer first — preview serves the file from disk",
 			vim.log.levels.WARN)
+		return nil
+	end
+	return file
+end
+
+function M.open(buf)
+	local file = guard(buf)
+	if not file then
 		return
 	end
-	if M.proc then
-		vim.notify("mdrev: preview already running for this editor", vim.log.levels.INFO)
+	-- Same file again: the watcher already keeps the page current, so just
+	-- remind the reviewer where it lives.
+	local running = M.procs[file]
+	if running and running.proc then
+		vim.notify("mdrev: preview already at " .. (running.url or "its port"), vim.log.levels.INFO)
 		return
 	end
 	local group = vim.api.nvim_create_augroup("mdrev-preview", { clear = true })
-	-- VimLeavePre chains can be cut short by an earlier handler's error (seen
-	-- under LazyVim), so the later event carries the same kill as a backup.
 	for _, event in ipairs({ "VimLeavePre", "VimLeave" }) do
 		vim.api.nvim_create_autocmd(event, {
 			group = group,
-			callback = function()
-				pcall(leave_kill)
-			end,
+			callback = leave_kill,
 		})
 	end
 	local launched, proc = pcall(vim.system, { cli.bin(), "preview", file }, {
@@ -46,13 +56,18 @@ function M.open(buf)
 		stdout = function(err, data)
 			-- The server prints its URL as the first (only) stdout line.
 			if not err and data and data:match("^http") then
+				local url = data:gsub("%s+", "")
+				local entry = M.procs[file]
+				if entry then
+					entry.url = url
+				end
 				vim.schedule(function()
-					vim.notify("mdrev: preview at " .. data:gsub("%s+", ""))
+					vim.notify("mdrev: preview at " .. url)
 				end)
 			end
 		end,
 	}, function(out)
-		M.proc = nil
+		M.procs[file] = nil
 		if out.code ~= 0 then
 			vim.schedule(function()
 				vim.notify("mdrev: preview stopped: " .. (out.stderr or ("exit " .. out.code)),
@@ -64,7 +79,7 @@ function M.open(buf)
 		vim.notify("mdrev: " .. proc, vim.log.levels.ERROR)
 		return
 	end
-	M.proc = proc
+	M.procs[file] = { proc = proc }
 end
 
 return M
