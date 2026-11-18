@@ -51,6 +51,11 @@ opts = {
   and move the document cursor to the anchor, `r` reply (same compose
   keys, no type row), `x` resolve, `q` or `mt` closes. The panel closes by
   itself when the review turns clean.
+- **`:MdrevPreview`** — `mdrev preview` on the current file: the rendered
+  document with its threads in the browser margin, where comments can be
+  filed — select a fragment to anchor one to the quote, like `mc` on a
+  selection — replied to and resolved too. The buffer must be saved first —
+  the preview serves the file from disk; the server stops with the editor.
 - **Everything stays in sync** — actions go through the mdrev CLI against
   the sidecar; the language server picks changes up within a second, and
   lock contention with it is retried once.
